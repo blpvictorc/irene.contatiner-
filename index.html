@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Container Manifest Sanitizer & Extractor</title>
+    <!-- Tailwind CSS for Unified Modern UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS for reading Excel files (.xls, .xlsx, .xlsm, .csv) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- ExcelJS for exporting styled .xlsx with Aptos Display & centered alignment -->
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+    <!-- FileSaver for saving exported files -->
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background-color: #f1f5f9; }
+        .tab-active { border-bottom: 3px solid #2563eb; color: #1d4ed8; font-weight: 700; background-color: #eff6ff; }
+        .cell-input { border: 1px solid #cbd5e1; border-radius: 0.375rem; padding: 0.3rem 0.5rem; font-size: 0.8rem; background-color: #ffffff; transition: all 0.15s; text-align: center; }
+        .cell-input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2); background-color: #eff6ff; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col text-slate-800">
+
+    <!-- Top Header Bar (Unified UI Style) -->
+    <header class="bg-slate-900 text-white shadow-lg px-6 py-4 flex flex-wrap justify-between items-center gap-4">
+        <div class="flex items-center space-x-3">
+            <span class="text-2xl">🚢</span>
+            <div>
+                <h1 class="text-xl font-bold tracking-tight">Container Manifest Sanitizer & Extractor</h1>
+                <p class="text-xs text-slate-400">CleanSpace Engine v1.1 • Auto-Detects CTNR#, SEAL#, CTN, CBM & KGS (GW/NW) • Adjustable Header Row & Noise Filter</p>
+            </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2.5">
+            <span id="statusBadge" class="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                Waiting for Source File
+            </span>
+            <button onclick="copyTableToClipboard(true)" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg shadow flex items-center space-x-1.5 transition">
+                <span>📋 Copy All (With Headers)</span>
+            </button>
+            <button onclick="copyTableToClipboard(false)" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg shadow flex items-center space-x-1.5 transition">
+                <span>📋 Copy Data Only</span>
+            </button>
+            <button onclick="exportCleanExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow flex items-center space-x-1.5 transition">
+                <span>💾 Export "ContainerNo." (.xlsx)</span>
+            </button>
+            <button onclick="resetWorkspace()" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-xs font-medium rounded-lg transition">
+                🔄 Reset
+            </button>
+        </div>
+    </header>
+
+    <!-- Toast Notification for Copy Feedback -->
+    <div id="copyToast" class="fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-emerald-500/50 flex items-center space-x-2.5 z-50 hidden transition-all">
+        <span class="text-emerald-400 text-lg">✅</span>
+        <span id="copyToastMsg" class="text-xs font-bold">Copied to clipboard! Ready to paste (Ctrl+V) in Excel.</span>
+    </div>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 p-6 max-w-[1600px] w-full mx-auto space-y-6">
+
+        <!-- Top 3 Cards: Upload, Column & Cleaning Settings, Live Summary -->
+        <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- Card 1: Upload Source Excel File -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-1 rounded">Step 1</span>
+                        <span id="fileStatusText" class="text-xs text-slate-400">Not Uploaded</span>
+                    </div>
+                    <h2 class="text-base font-bold text-slate-800 mb-1">Upload Source Excel / CSV File</h2>
+                    <p class="text-xs text-slate-500 mb-3">Automatically scans for <code>CTNR#</code> or <code>CTN#</code> and extracts <code>SEAL#</code>, <code>CTN</code>, <code>CBM</code>, and <code>KGS</code> (Gross/Net Weight).</p>
+                    <div class="flex items-center space-x-2 mb-3">
+                        <label class="text-xs font-semibold text-slate-600 whitespace-nowrap">Worksheet:</label>
+                        <select id="sheetSelect" onchange="onSheetChange()" class="w-full text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                            <option value="">-- Upload a file first --</option>
+                        </select>
+                    </div>
+                </div>
+                <label id="dropZone" class="border-2 border-dashed border-blue-300 hover:border-blue-500 bg-blue-50/40 hover:bg-blue-50 transition rounded-lg p-4 text-center cursor-pointer">
+                    <input type="file" id="fileInput" accept=".xls,.xlsx,.xlsm,.csv" class="hidden" onchange="handleFileUpload(event)">
+                    <div class="text-sm font-semibold text-blue-700">📂 Click or Drag Source File Here</div>
+                    <div id="fileNameDisplay" class="text-xs text-slate-500 mt-1 truncate">Supports .xlsx, .xls, .xlsm, .csv</div>
+                </label>
+            </div>
+
+            <!-- Card 2: Adjustable Header Row, Column Mapping & Deep-Clean Options -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex flex-col justify-between">
+                <div>
+                    <div class="flex flex-wrap justify-between items-center mb-2 gap-2">
+                        <span class="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded">Step 2</span>
+                        <!-- Interactive Adjustable Header Row Control -->
+                        <div class="flex items-center space-x-1.5 bg-indigo-50/80 px-2.5 py-1 rounded-lg border border-indigo-200">
+                            <label for="headerRowInput" class="text-xs font-bold text-indigo-900">Header Row #:</label>
+                            <input type="number" id="headerRowInput" value="1" min="1" onchange="onManualHeaderRowChange(true)" class="w-16 border border-indigo-300 rounded px-1.5 py-0.5 text-xs font-mono font-extrabold text-center text-indigo-900 bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none" title="Change Header Row # to re-detect columns on that row and extract rows below it">
+                            <button onclick="autoFindHeaderRow()" class="text-[11px] bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-2 py-0.5 rounded transition" title="Auto-find row with CTNR# or CTN#">Auto</button>
+                        </div>
+                    </div>
+                    <h2 class="text-base font-bold text-slate-800 mb-2">Sanitization & Column Mapping</h2>
+
+                    <!-- Column Selectors -->
+                    <div class="grid grid-cols-5 gap-1.5 mb-3 text-[11px]">
+                        <div>
+                            <label class="block font-bold text-blue-800 mb-0.5 truncate" id="lblColCtnr">CTNR# *</label>
+                            <select id="colCtnrSelect" onchange="reExtractFromManualCols()" class="col-mapper-select w-full border border-blue-300 rounded px-1 py-1 bg-blue-50/40 font-bold"></select>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-0.5 truncate" id="lblColSeal">SEAL#</label>
+                            <select id="colSealSelect" onchange="reExtractFromManualCols()" class="col-mapper-select w-full border border-slate-300 rounded px-1 py-1 bg-white"></select>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-0.5 truncate" id="lblColCtn">CTN</label>
+                            <select id="colCtnSelect" onchange="reExtractFromManualCols()" class="col-mapper-select w-full border border-slate-300 rounded px-1 py-1 bg-white"></select>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-0.5 truncate" id="lblColCbm">CBM</label>
+                            <select id="colCbmSelect" onchange="reExtractFromManualCols()" class="col-mapper-select w-full border border-slate-300 rounded px-1 py-1 bg-white"></select>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-emerald-800 mb-0.5 truncate" id="lblColKgs" title="Supports KGS, GW, Gross Weight, NW, Net Weight, etc.">KGS (GW/NW)</label>
+                            <select id="colKgsSelect" onchange="reExtractFromManualCols()" class="col-mapper-select w-full border border-emerald-400 rounded px-1 py-1 bg-emerald-50/40 font-bold"></select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cleaning Rule Checkboxes -->
+                <div class="space-y-1.5 pt-2 border-t border-slate-100 text-xs">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+    <input type="checkbox" id="chkRemoveAllInternalSpaces" checked onchange="reExtractFromManualCols()" class="w-4 h-4 text-blue-600 rounded">
+    <span class="text-slate-700 font-medium">Remove <b>ALL</b> internal spaces in CTNR# & SEAL# (e.g. <code>TRHU8009699</code>)</span>
+</label>
+<label class="flex items-center space-x-2 cursor-pointer">
+    <input type="checkbox" id="chkFilterNoiseRows" checked onchange="reExtractFromManualCols()" class="w-4 h-4 text-blue-600 rounded">
+    <span class="text-slate-700 font-medium">Auto-skip footer noise & non-container words (e.g. <code>Shipping</code>, <code>Order</code>, <code>TOTAL</code>)</span>
+</label>
+                </div>
+            </div>
+
+            <!-- Card 3: Live Summary Metrics -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded">Summary</span>
+                        <span id="charsCleanedBadge" class="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">0 Hidden Spaces Removed</span>
+                    </div>
+                    <h2 class="text-base font-bold text-slate-800 mb-3">Extracted Manifest Totals</h2>
+                    <div class="grid grid-cols-4 gap-2 text-center">
+                        <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                            <div class="text-[11px] text-slate-500">Containers</div>
+                            <div id="statContainerCount" class="text-base font-extrabold text-blue-700">0</div>
+                        </div>
+                        <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                            <div class="text-[11px] text-slate-500">Total CTN</div>
+                            <div id="statTotalCtn" class="text-base font-extrabold text-slate-800">0</div>
+                        </div>
+                        <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                            <div class="text-[11px] text-slate-500">Total CBM</div>
+                            <div id="statTotalCbm" class="text-base font-extrabold text-indigo-700">0.00</div>
+                        </div>
+                        <div class="bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
+                            <div class="text-[11px] text-emerald-700 font-medium" id="statKgsTitle">Total KGS</div>
+                            <div id="statTotalKgs" class="text-base font-extrabold text-emerald-700">0.00</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center text-xs text-slate-500">
+                    <span>Font: <b>Aptos Display</b> • Centered</span>
+                    <button onclick="copyTableToClipboard(true)" class="text-blue-600 hover:underline font-bold">📋 Quick Copy All</button>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- Main Workspace Tabs -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="flex border-b border-slate-200 bg-slate-50 overflow-x-auto">
+                <button onclick="switchTab('tab-clean')" id="btn-tab-clean" class="px-5 py-3.5 text-sm font-medium text-slate-600 hover:text-slate-900 transition whitespace-nowrap tab-active">
+                    1️⃣ Cleaned Container Table (<span id="badgeCleanCount">0</span>)
+                </button>
+                <button onclick="switchTab('tab-raw')" id="btn-tab-raw" class="px-5 py-3.5 text-sm font-medium text-slate-600 hover:text-slate-900 transition whitespace-nowrap">
+                    2️⃣ Source Sheet Inspector (Click Any Row # to Set Header Row)
+                </button>
+            </div>
+
+            <!-- TAB 1: CLEANED CONTAINER TABLE -->
+            <div id="tab-clean" class="p-6">
+                <!-- Filter & Action Toolbar -->
+                <div class="bg-slate-100 p-3 rounded-xl border border-slate-200 mb-4 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div class="flex flex-wrap items-center gap-2 flex-1">
+                        <span class="font-bold text-slate-700">🔍 Filter:</span>
+                        <input type="text" id="searchInput" oninput="renderCleanTable()" placeholder="Search CTNR#, SEAL#, CTN, CBM or KGS..." class="border border-slate-300 rounded-lg px-3 py-1.5 bg-white min-w-[260px] focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                        <button onclick="document.getElementById('searchInput').value=''; renderCleanTable();" class="px-2.5 py-1.5 bg-white hover:bg-slate-200 text-slate-600 border border-slate-300 rounded-lg font-semibold">✕ Clear</button>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button onclick="addBlankContainerRow()" class="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-lg shadow-sm transition">
+                            ➕ Add Row
+                        </button>
+                        <button onclick="copyTableToClipboard(true)" class="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow transition">
+                            📋 Copy Table (With Headers)
+                        </button>
+                        <button onclick="copyTableToClipboard(false)" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg shadow transition">
+                            📋 Copy Data Only (No Headers)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Cleaned Output Table -->
+                <div class="border border-slate-200 rounded-xl overflow-x-auto bg-white shadow-inner">
+                    <table class="w-full text-xs text-center border-collapse">
+                        <thead class="bg-slate-800 text-white">
+                            <tr>
+                                <th class="py-3 px-3 w-14 text-center">#</th>
+                                <th class="py-3 px-3">
+                                    <div class="flex items-center justify-center space-x-2">
+                                        <span id="hdrCtnrTitle">CTNR#</span>
+                                        <button onclick="copySingleColumn('ctnr')" class="px-1.5 py-0.5 bg-slate-700 hover:bg-blue-600 text-[10px] rounded transition" title="Copy CTNR# Column">📋 Copy Col</button>
+                                    </div>
+                                </th>
+                                <th class="py-3 px-3">
+                                    <div class="flex items-center justify-center space-x-2">
+                                        <span>SEAL#</span>
+                                        <button onclick="copySingleColumn('seal')" class="px-1.5 py-0.5 bg-slate-700 hover:bg-blue-600 text-[10px] rounded transition" title="Copy SEAL# Column">📋 Copy Col</button>
+                                    </div>
+                                </th>
+                                <th class="py-3 px-3">
+                                    <div class="flex items-center justify-center space-x-2">
+                                        <span>CTN</span>
+                                        <button onclick="copySingleColumn('ctn')" class="px-1.5 py-0.5 bg-slate-700 hover:bg-blue-600 text-[10px] rounded transition" title="Copy CTN Column">📋 Copy Col</button>
+                                    </div>
+                                </th>
+                                <th class="py-3 px-3">
+                                    <div class="flex items-center justify-center space-x-2">
+                                        <span>CBM</span>
+                                        <button onclick="copySingleColumn('cbm')" class="px-1.5 py-0.5 bg-slate-700 hover:bg-blue-600 text-[10px] rounded transition" title="Copy CBM Column">📋 Copy Col</button>
+                                    </div>
+                                </th>
+                                <th class="py-3 px-3">
+                                    <div class="flex items-center justify-center space-x-2">
+                                        <span id="hdrKgsTitle">KGS</span>
+                                        <button onclick="copySingleColumn('kgs')" class="px-1.5 py-0.5 bg-slate-700 hover:bg-blue-600 text-[10px] rounded transition" title="Copy KGS Column">📋 Copy Col</button>
+                                    </div>
+                                </th>
+                                <th class="py-3 px-3 w-16">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cleanTableBody" class="divide-y divide-slate-200 font-mono">
+                            <tr>
+                                <td colspan="7" class="py-12 text-center text-slate-400 font-sans">
+                                    Please upload an Excel or CSV file above to auto-detect and deep-clean container data.
+                                </td>
+                            </tr>
+                        </tbody>
+                        <tfoot id="cleanTableFoot" class="bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300 hidden">
+                            <tr>
+                                <td class="py-2.5 px-3 text-center">TOTAL</td>
+                                <td id="footCtnrCount" class="py-2.5 px-3 text-center text-blue-700">0 Containers</td>
+                                <td class="py-2.5 px-3 text-center text-slate-400">-</td>
+                                <td id="footSumCtn" class="py-2.5 px-3 text-center font-mono">0</td>
+                                <td id="footSumCbm" class="py-2.5 px-3 text-center font-mono text-indigo-700">0.000</td>
+                                <td id="footSumKgs" class="py-2.5 px-3 text-center font-mono text-emerald-700">0.00</td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 2: SOURCE SHEET INSPECTOR -->
+            <div id="tab-raw" class="p-6 hidden">
+                <div class="mb-3 flex flex-wrap justify-between items-center gap-2">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-800">🔍 Source Worksheet Preview (First 150 Rows)</h3>
+                        <p class="text-xs text-slate-500">
+                            Click any <b>Row #</b> on the left to set it as the <span class="px-1.5 py-0.5 bg-amber-200 text-amber-900 font-bold rounded">Header Row (HDR)</span>! Extracted Container Rows are marked with <span class="px-1.5 py-0.5 bg-blue-600 text-white font-bold rounded">✓</span>.
+                        </p>
+                    </div>
+                </div>
+                <div class="border border-slate-300 rounded-xl overflow-auto max-h-[540px] bg-white shadow-inner">
+                    <table class="w-full text-[11px] text-left border-collapse">
+                        <thead id="rawPreviewHead" class="bg-slate-800 text-white sticky top-0 z-10"></thead>
+                        <tbody id="rawPreviewBody" class="divide-y divide-slate-200 font-mono"></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+<script>
+// ============================================================================
+// GLOBAL STATE
+// ============================================================================
+let state = {
+    workbook: null,
+    currentSheet: '',
+    grid: [],
+    headerRow: 1,      // 1-based row index (Adjustable)
+    srcCtnrHeader: 'CTNR#',
+    detectedKgsLabel: 'KGS',
+    cols: {
+        ctnr: 0,       // 1-based col index
+        seal: 0,
+        ctn: 0,
+        cbm: 0,
+        kgs: 0
+    },
+    cleanedRows: [],   // Array of { id, srcRow, ctnr, seal, ctn, cbm, kgs }
+    matchedSrcRows: new Set(),
+    hiddenSpacesRemovedCount: 0
+};
+
+// Non-container English words / footer labels that should never be treated as a lone CTNR#
+const NON_CONTAINER_NOISE_WORDS = new Set([
+    'SHIPPING', 'ORDER', 'SHIPPING ORDER', 'TOTAL', 'TOTAL:', 'SUBTOTAL', 'GRAND TOTAL',
+    'SUMMARY', 'REMARK', 'REMARKS', 'IMPORTANT', 'SIGNATURE', 'SIGNATURE / CHOP',
+    'CONTAINER', 'CONTAINER#', 'CTNR#', 'CTN#', 'PAGE', 'END', 'NIL', 'N/A'
+]);
+
+window.addEventListener('DOMContentLoaded', () => {
+    populateColumnSelects();
+    setupDragAndDrop();
+});
+
+function colIndexToLetter(col1Based) {
+    let temp, letter = '';
+    let col = col1Based;
+    while (col > 0) {
+        temp = (col - 1) % 26;
+        letter = String.fromCharCode(temp + 65) + letter;
+        col = (col - temp - 1) / 26;
+    }
+    return letter;
+}
+
+function populateColumnSelects(headerRowGrid = null) {
+    const selects = document.querySelectorAll('.col-mapper-select');
+    let maxCols = 35;
+    if (headerRowGrid && headerRowGrid.length > maxCols) {
+        maxCols = Math.min(52, headerRowGrid.length);
+    }
+
+    selects.forEach(s => {
+        const prevVal = s.value;
+        let html = `<option value="0">-- None --</option>`;
+        for (let c = 1; c <= maxCols; c++) {
+            let hdrHint = '';
+            if (headerRowGrid && headerRowGrid[c - 1] !== undefined) {
+                const hTxt = cleanString(headerRowGrid[c - 1], false, false);
+                if (hTxt) hdrHint = ` - ${hTxt.substring(0, 14)}`;
+            }
+            html += `<option value="${c}">Col ${colIndexToLetter(c)} (${c})${escapeAttr(hdrHint)}</option>`;
+        }
+        s.innerHTML = html;
+        if (prevVal) s.value = prevVal;
+    });
+}
+
+function setupDragAndDrop() {
+    const dropZone = document.getElementById('dropZone');
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
+        dropZone.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); });
+    });
+    dropZone.addEventListener('drop', e => {
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+            processUploadedFile(files[0]);
+        }
+    });
+}
+
+// ============================================================================
+// EXACT PORT OF VBA CleanString(ByVal val As Variant) As String
+// ============================================================================
+function cleanString(val, stripAllSpaces = false, countMetrics = true) {
+    if (val === null || val === undefined) return '';
+    let raw = String(val);
+
+    if (countMetrics) {
+        const nbspMatches = (raw.match(/[\u00A0\u3000\x00-\x1F\x7F-\x9F]/g) || []).length;
+        const multiSpaceMatches = (raw.match(/\s{2,}|^\s+|\s+$/g) || []).length;
+        state.hiddenSpacesRemovedCount += (nbspMatches + multiSpaceMatches);
+    }
+
+    // 1. Replace HTML/System non-breaking spaces (Chr 160 / \u00A0 & \u3000) with standard spaces
+    let result = raw.replace(/[\u00A0\u3000]/g, ' ');
+
+    // 2. WorksheetFunction.Clean: Remove non-printable ASCII control characters (including Tab \t, CR \r, LF \n)
+    result = result.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+
+    // 3. WorksheetFunction.Trim + VBA Trim: Collapse multiple internal spaces to single space & trim edges
+    result = result.replace(/\s+/g, ' ').trim();
+
+    // 4. Optional: Strip ALL internal spaces if user enabled checkbox for CTNR# / SEAL#
+    if (stripAllSpaces) {
+        result = result.replace(/\s+/g, '');
+    }
+
+    return result;
+}
+
+function escapeAttr(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function toNum(val) {
+    if (val === null || val === undefined || val === '') return 0;
+    const cleaned = String(val).replace(/,/g, '').trim();
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? 0 : n;
+}
+
+function getCell(grid, r1Based, c1Based) {
+    if (r1Based < 1 || c1Based < 1) return '';
+    const row = grid[r1Based - 1];
+    if (!row) return '';
+    const val = row[c1Based - 1];
+    return (val === null || val === undefined) ? '' : val;
+}
+
+// ============================================================================
+// FILE UPLOAD & AUTO-SHEET / HEADER DETECTION
+// ============================================================================
+function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (file) processUploadedFile(file);
+}
+
+function processUploadedFile(file) {
+    document.getElementById('fileNameDisplay').textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array' });
+        state.workbook = wb;
+
+        const sheetSel = document.getElementById('sheetSelect');
+        sheetSel.innerHTML = wb.SheetNames.map(n => `<option value="${escapeAttr(n)}">${escapeAttr(n)}</option>`).join('');
+
+        let bestSheet = wb.SheetNames[0];
+        for (const sName of wb.SheetNames) {
+            const g = XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, raw: false, defval: '' });
+            const found = findCtnrHeaderInGrid(g);
+            if (found) {
+                bestSheet = sName;
+                break;
+            }
+        }
+
+        sheetSel.value = bestSheet;
+        state.currentSheet = bestSheet;
+        loadAndAnalyzeCurrentSheet();
+
+        document.getElementById('fileStatusText').textContent = '✅ Loaded';
+        document.getElementById('fileStatusText').className = 'text-xs font-bold text-emerald-600';
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function onSheetChange() {
+    const sel = document.getElementById('sheetSelect').value;
+    if (!sel || !state.workbook) return;
+    state.currentSheet = sel;
+    loadAndAnalyzeCurrentSheet();
+}
+
+// Finds "CTNR#" or "CTN#" or common Container Header variations
+function findCtnrHeaderInGrid(grid) {
+    // Pass 1: Exact match for "CTNR#" or "CTN#" (Matches original VBA)
+    for (let r = 1; r <= grid.length; r++) {
+        const row = grid[r - 1] || [];
+        for (let c = 1; c <= row.length; c++) {
+            const rawVal = cleanString(row[c - 1], false, false);
+            const upper = rawVal.toUpperCase();
+            if (upper === 'CTNR#' || upper === 'CTN#') {
+                return { row: r, col: c, headerText: rawVal };
+            }
+        }
+    }
+    // Pass 2: Fallback for "CONTAINER#", "CONTAINER NO.", "CTNR NO.", "CNTR#"
+    for (let r = 1; r <= Math.min(80, grid.length); r++) {
+        const row = grid[r - 1] || [];
+        for (let c = 1; c <= row.length; c++) {
+            const rawVal = cleanString(row[c - 1], false, false);
+            const upper = rawVal.toUpperCase();
+            if (/^(CONTAINER\s*#|CONTAINER\s*NO\.?|CTNR\s*NO\.?|CNTR\s*#|CNTR\s*NO\.?)$/.test(upper)) {
+                return { row: r, col: c, headerText: rawVal };
+            }
+        }
+    }
+    return null;
+}
+
+// Upgraded Smart Header Column Finder (Supports GW, Gross Weight, NW, Net Weight, KGS, KILOS, etc.)
+function findHeaderColInRow(grid, rowNum, targetName) {
+    const row = grid[rowNum - 1] || [];
+    const targetUpper = targetName.toUpperCase();
+
+    // Pass 1: Exact match (LookAt:=xlWhole, MatchCase:=False)
+    for (let c = 1; c <= row.length; c++) {
+        const cellCleaned = cleanString(row[c - 1], false, false).toUpperCase();
+        if (cellCleaned === targetUpper) {
+            return c;
+        }
+    }
+
+    // Pass 2: Smart Multi-Tier Matching for Weight (KGS / GW / NW), SEAL#, CTN, CBM
+    if (targetUpper === 'KGS') {
+        // Priority 2A: Gross Weight / KGS / KG / KILOS variations (e.g. "GW", "G.W.", "G.W", "GROSS WEIGHT", "KGS", "KG")
+        for (let c = 1; c <= row.length; c++) {
+            const h = cleanString(row[c - 1], false, false).toUpperCase();
+            if (!h) continue;
+            if (
+                h === 'GW' || h === 'G.W.' || h === 'G.W' || h === 'G/W' ||
+                h === 'KG' || h === 'KGS' || h === 'KILOS' ||
+                h.includes('GROSS') || h.includes('G.W') || h.includes('KGS') || h.includes('KILO') ||
+                /\bGW\b/.test(h)
+            ) {
+                return c;
+            }
+        }
+        // Priority 2B: Net Weight / General Weight variations (e.g. "NW", "N.W.", "NET WEIGHT", "WEIGHT", "WT")
+        for (let c = 1; c <= row.length; c++) {
+            const h = cleanString(row[c - 1], false, false).toUpperCase();
+            if (!h) continue;
+            if (
+                h === 'NW' || h === 'N.W.' || h === 'N.W' || h === 'N/W' ||
+                h === 'WEIGHT' || h === 'WT' || h === 'WT.' ||
+                h.includes('NET') || h.includes('N.W') || h.includes('WEIGHT') ||
+                /\bNW\b/.test(h)
+            ) {
+                return c;
+            }
+        }
+        return 0;
+    }
+
+    for (let c = 1; c <= row.length; c++) {
+        const h = cleanString(row[c - 1], false, false).toUpperCase();
+        if (!h) continue;
+        if (targetUpper === 'CTNR#' && (h === 'CTNR#' || h === 'CTN#' || h.includes('CTNR') || h.includes('CONTAINER') || h.includes('CNTR'))) return c;
+        if (targetUpper === 'SEAL#' && h.includes('SEAL')) return c;
+        if (targetUpper === 'CTN' && (h === 'CTNS' || h === 'CARTON' || h === 'CARTONS' || h === 'PKG' || h === 'PKGS' || h === 'QTY')) return c;
+        if (targetUpper === 'CBM' && (h.includes('CBM') || h.includes('MEAS') || h.includes('VOL') || h.includes('M3'))) return c;
+    }
+
+    return 0;
+}
+
+function detectColumnsOnRow(rowNum) {
+    state.headerRow = Math.max(1, Math.min(state.grid.length || 1, Number(rowNum) || 1));
+    document.getElementById('headerRowInput').value = state.headerRow;
+
+    const hdrRowArr = state.grid[state.headerRow - 1] || [];
+    populateColumnSelects(hdrRowArr);
+
+    const ctnrCol = findHeaderColInRow(state.grid, state.headerRow, 'CTNR#');
+    const sealCol = findHeaderColInRow(state.grid, state.headerRow, 'SEAL#');
+    const ctnCol  = findHeaderColInRow(state.grid, state.headerRow, 'CTN');
+    const cbmCol  = findHeaderColInRow(state.grid, state.headerRow, 'CBM');
+    const kgsCol  = findHeaderColInRow(state.grid, state.headerRow, 'KGS');
+
+    if (ctnrCol > 0) state.cols.ctnr = ctnrCol;
+    if (sealCol > 0) state.cols.seal = sealCol;
+    if (ctnCol > 0)  state.cols.ctn  = ctnCol;
+    if (cbmCol > 0)  state.cols.cbm  = cbmCol;
+    if (kgsCol > 0)  state.cols.kgs  = kgsCol;
+
+    if (state.cols.ctnr > 0) {
+        const rawHdr = cleanString(getCell(state.grid, state.headerRow, state.cols.ctnr), false, false);
+        if (rawHdr) state.srcCtnrHeader = rawHdr;
+    }
+
+    syncColumnLabelsAndDropdowns();
+}
+
+function syncColumnLabelsAndDropdowns() {
+    document.getElementById('colCtnrSelect').value = state.cols.ctnr;
+    document.getElementById('colSealSelect').value = state.cols.seal;
+    document.getElementById('colCtnSelect').value  = state.cols.ctn;
+    document.getElementById('colCbmSelect').value  = state.cols.cbm;
+    document.getElementById('colKgsSelect').value  = state.cols.kgs;
+
+    const kgsHdrRaw = state.cols.kgs > 0 ? cleanString(getCell(state.grid, state.headerRow, state.cols.kgs), false, false) : '';
+    state.detectedKgsLabel = kgsHdrRaw || 'KGS';
+
+    document.getElementById('hdrCtnrTitle').textContent = state.srcCtnrHeader || 'CTNR#';
+    document.getElementById('lblColKgs').textContent = kgsHdrRaw ? `KGS [${kgsHdrRaw}]` : 'KGS (GW/NW)';
+    document.getElementById('hdrKgsTitle').textContent = kgsHdrRaw && kgsHdrRaw.toUpperCase() !== 'KGS' ? `KGS (${kgsHdrRaw})` : 'KGS';
+    document.getElementById('statKgsTitle').textContent = kgsHdrRaw && kgsHdrRaw.toUpperCase() !== 'KGS' ? `Total KGS (${kgsHdrRaw})` : 'Total KGS';
+}
+
+function loadAndAnalyzeCurrentSheet() {
+    const ws = state.workbook.Sheets[state.currentSheet];
+    state.grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+
+    autoFindHeaderRow();
+}
+
+function autoFindHeaderRow() {
+    if (!state.grid || state.grid.length === 0) return;
+    const found = findCtnrHeaderInGrid(state.grid);
+
+    if (!found) {
+        state.headerRow = 1;
+        state.srcCtnrHeader = 'CTNR#';
+        state.cols = { ctnr: 1, seal: 2, ctn: 3, cbm: 4, kgs: 5 };
+        document.getElementById('headerRowInput').value = 1;
+        populateColumnSelects(state.grid[0] || []);
+        syncColumnLabelsAndDropdowns();
+        document.getElementById('statusBadge').textContent = '⚠️ Header "CTNR#" not found — Adjust Header Row # or Columns';
+        document.getElementById('statusBadge').className = 'px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40';
+    } else {
+        state.cols = { ctnr: 0, seal: 0, ctn: 0, cbm: 0, kgs: 0 };
+        state.srcCtnrHeader = found.headerText;
+        detectColumnsOnRow(found.row);
+        document.getElementById('statusBadge').textContent = `✅ Extracted from "${state.currentSheet}" (Header Row #${state.headerRow})`;
+        document.getElementById('statusBadge').className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+    }
+
+    extractAndCleanData();
+}
+
+// Triggered when user manually edits Header Row # or clicks a row in Tab 2
+function onManualHeaderRowChange(reDetectCols = true) {
+    if (!state.grid || state.grid.length === 0) return;
+    const newRow = Math.max(1, Math.min(state.grid.length, Number(document.getElementById('headerRowInput').value) || 1));
+    state.headerRow = newRow;
+
+    if (reDetectCols) {
+        detectColumnsOnRow(newRow);
+    } else {
+        populateColumnSelects(state.grid[newRow - 1] || []);
+        syncColumnLabelsAndDropdowns();
+    }
+
+    document.getElementById('statusBadge').textContent = `✅ Extracted from "${state.currentSheet}" (Header Row #${state.headerRow})`;
+    document.getElementById('statusBadge').className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+    extractAndCleanData();
+}
+
+function setHeaderRowFromInspector(rowNum) {
+    document.getElementById('headerRowInput').value = rowNum;
+    onManualHeaderRowChange(true);
+    showCopyToast(`Header Row set to Row #${rowNum}! Columns auto-updated.`);
+}
+
+function reExtractFromManualCols() {
+    state.cols.ctnr = Number(document.getElementById('colCtnrSelect').value) || 0;
+    state.cols.seal = Number(document.getElementById('colSealSelect').value) || 0;
+    state.cols.ctn  = Number(document.getElementById('colCtnSelect').value) || 0;
+    state.cols.cbm  = Number(document.getElementById('colCbmSelect').value) || 0;
+    state.cols.kgs  = Number(document.getElementById('colKgsSelect').value) || 0;
+
+    syncColumnLabelsAndDropdowns();
+    if (state.grid.length > 0) {
+        extractAndCleanData();
+    }
+}
+
+// ============================================================================
+// CORE EXTRACTION & NOISE FILTERING ENGINE
+// ============================================================================
+function isFooterSectionStart(grid, r) {
+    // Checks if row r starts the SI legal disclaimer / signature footer block
+    const colA = cleanString(getCell(grid, r, 1), false, false).toUpperCase();
+    const colH = cleanString(getCell(grid, r, 8), false, false).toUpperCase();
+    if (colA === 'IMPORTANT' || colA.startsWith('SHIPPERS ARE REQUESTED') || colA.startsWith('THE COMPANY RESERVES')) {
+        return true;
+    }
+    if (colH.includes("SHIPPING'S DECLARATION") || colH.includes('SIGNATURE / CHOP')) {
+        return true;
+    }
+    return false;
+}
+
+function isValidContainerRow(ctnrValue, sealValue, ctnValue, cbmValue, kgsValue, filterNoise) {
+    const upperCtnr = ctnrValue.toUpperCase();
+    if (!ctnrValue || upperCtnr === 'CTNR#' || upperCtnr === 'CTN#') return false;
+
+    if (!filterNoise) return true;
+
+    // 1. Block known noise / summary / footer words
+    if (NON_CONTAINER_NOISE_WORDS.has(upperCtnr)) return false;
+    if (/^(TOTAL|GRAND\s*TOTAL|SUB\s*TOTAL|SUMMARY|SHIPPING|ORDER\b)/i.test(upperCtnr)) return false;
+
+    // 2. Check if companion metrics (SEAL#, CTN, CBM, KGS) are all empty
+    const hasCompanionData = (sealValue !== '' || ctnValue !== '' || cbmValue !== '' || kgsValue !== '');
+
+    // 3. If all companion columns are empty, CTNR# MUST look like a real container number (contain at least 1 digit, e.g. TRHU6765207)
+    //    This immediately eliminates stray English words at the bottom of the sheet like "Shipping" and "Order"!
+    const hasDigitInCtnr = /\d/.test(ctnrValue);
+    if (!hasCompanionData && !hasDigitInCtnr) {
+        return false;
+    }
+
+    return true;
+}
+
+function extractAndCleanData() {
+    state.cleanedRows = [];
+    state.matchedSrcRows = new Set();
+    state.hiddenSpacesRemovedCount = 0;
+
+    const stripInternal = document.getElementById('chkRemoveAllInternalSpaces').checked;
+    const filterNoise   = document.getElementById('chkFilterNoiseRows').checked;
+
+    const ctnrCol = state.cols.ctnr;
+    const sealCol = state.cols.seal;
+    const ctnCol  = state.cols.ctn;
+    const cbmCol  = state.cols.cbm;
+    const kgsCol  = state.cols.kgs;
+
+    if (ctnrCol > 0 && state.grid.length > state.headerRow) {
+        let hitDisclaimerFooter = false;
+
+        for (let i = state.headerRow + 1; i <= state.grid.length; i++) {
+            if (filterNoise && isFooterSectionStart(state.grid, i)) {
+                hitDisclaimerFooter = true;
+            }
+            if (hitDisclaimerFooter && filterNoise) {
+                continue;
+            }
+
+            const ctnrValue = cleanString(getCell(state.grid, i, ctnrCol), stripInternal, true);
+            const sealValue = sealCol > 0 ? cleanString(getCell(state.grid, i, sealCol), stripInternal, true) : '';
+            const ctnValue  = ctnCol > 0  ? cleanString(getCell(state.grid, i, ctnCol), false, true)  : '';
+            const cbmValue  = cbmCol > 0  ? cleanString(getCell(state.grid, i, cbmCol), false, true)  : '';
+            const kgsValue  = kgsCol > 0  ? cleanString(getCell(state.grid, i, kgsCol), false, true)  : '';
+
+            if (isValidContainerRow(ctnrValue, sealValue, ctnValue, cbmValue, kgsValue, filterNoise)) {
+                state.matchedSrcRows.add(i);
+                state.cleanedRows.push({
+                    id: state.cleanedRows.length + 1,
+                    srcRow: i,
+                    ctnr: ctnrValue,
+                    seal: sealValue,
+                    ctn: ctnValue,
+                    cbm: cbmValue,
+                    kgs: kgsValue
+                });
+            }
+        }
+    }
+
+    renderCleanTable();
+    renderRawInspector();
+    updateSummaryStats();
+}
+
+// ============================================================================
+// UI RENDERING & INTERACTIVE EDITING
+// ============================================================================
+function renderCleanTable() {
+    const tbody = document.getElementById('cleanTableBody');
+    const tfoot = document.getElementById('cleanTableFoot');
+    const query = (document.getElementById('searchInput').value || '').trim().toLowerCase();
+
+    document.getElementById('badgeCleanCount').textContent = state.cleanedRows.length;
+
+    if (state.cleanedRows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-12 text-center text-slate-400 font-sans">No container rows extracted. Upload a file or adjust Header Row # / Column Mapping in Step 2.</td></tr>`;
+        tfoot.classList.add('hidden');
+        return;
+    }
+
+    tfoot.classList.remove('hidden');
+
+    const filtered = state.cleanedRows
+        .map((row, idx) => ({ row, idx }))
+        .filter(({ row }) => {
+            if (!query) return true;
+            const hay = `${row.ctnr} ${row.seal} ${row.ctn} ${row.cbm} ${row.kgs}`.toLowerCase();
+            return hay.includes(query);
+        });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-400 font-sans">No rows match your filter "${escapeAttr(query)}".</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(({ row, idx }) => `
+        <tr class="hover:bg-blue-50/40 transition">
+            <td class="py-2 px-3 text-slate-400 text-center" title="Source Row #${row.srcRow || '-'}">${idx + 1}</td>
+            <td class="py-1.5 px-2">
+                <input type="text" value="${escapeAttr(row.ctnr)}" oninput="updateRowCell(${idx}, 'ctnr', this.value)" class="cell-input w-full font-bold text-blue-900">
+            </td>
+            <td class="py-1.5 px-2">
+                <input type="text" value="${escapeAttr(row.seal)}" oninput="updateRowCell(${idx}, 'seal', this.value)" class="cell-input w-full font-semibold text-slate-700">
+            </td>
+            <td class="py-1.5 px-2">
+                <input type="text" value="${escapeAttr(row.ctn)}" oninput="updateRowCell(${idx}, 'ctn', this.value)" class="cell-input w-full text-slate-800">
+            </td>
+            <td class="py-1.5 px-2">
+                <input type="text" value="${escapeAttr(row.cbm)}" oninput="updateRowCell(${idx}, 'cbm', this.value)" class="cell-input w-full text-indigo-700">
+            </td>
+            <td class="py-1.5 px-2">
+                <input type="text" value="${escapeAttr(row.kgs)}" oninput="updateRowCell(${idx}, 'kgs', this.value)" class="cell-input w-full text-emerald-700 font-semibold">
+            </td>
+            <td class="py-1.5 px-2 text-center">
+                <button onclick="deleteContainerRow(${idx})" class="text-rose-500 hover:text-rose-700 px-2 py-1 rounded hover:bg-rose-50 transition" title="Delete Row">🗑️</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function updateRowCell(idx, field, val) {
+    if (!state.cleanedRows[idx]) return;
+    state.cleanedRows[idx][field] = val.trim();
+    updateSummaryStats();
+}
+
+function addBlankContainerRow() {
+    state.cleanedRows.push({
+        id: state.cleanedRows.length + 1,
+        srcRow: 0,
+        ctnr: '',
+        seal: '',
+        ctn: '',
+        cbm: '',
+        kgs: ''
+    });
+    renderCleanTable();
+    updateSummaryStats();
+}
+
+function deleteContainerRow(idx) {
+    state.cleanedRows.splice(idx, 1);
+    renderCleanTable();
+    updateSummaryStats();
+}
+
+function updateSummaryStats() {
+    const count = state.cleanedRows.length;
+    let sumCtn = 0, sumCbm = 0, sumKgs = 0;
+
+    state.cleanedRows.forEach(r => {
+        sumCtn += toNum(r.ctn);
+        sumCbm += toNum(r.cbm);
+        sumKgs += toNum(r.kgs);
+    });
+
+    document.getElementById('statContainerCount').textContent = count;
+    document.getElementById('statTotalCtn').textContent = sumCtn.toLocaleString();
+    document.getElementById('statTotalCbm').textContent = sumCbm.toFixed(2);
+    document.getElementById('statTotalKgs').textContent = sumKgs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    document.getElementById('charsCleanedBadge').textContent = `${state.hiddenSpacesRemovedCount} Hidden/Extra Spaces Cleaned`;
+
+    document.getElementById('footCtnrCount').textContent = `${count} Container(s)`;
+    document.getElementById('footSumCtn').textContent = sumCtn.toLocaleString();
+    document.getElementById('footSumCbm').textContent = sumCbm.toFixed(3);
+    document.getElementById('footSumKgs').textContent = sumKgs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function renderRawInspector() {
+    const thead = document.getElementById('rawPreviewHead');
+    const tbody = document.getElementById('rawPreviewBody');
+
+    if (!state.grid || state.grid.length === 0) {
+        thead.innerHTML = '';
+        tbody.innerHTML = `<tr><td class="p-8 text-center text-slate-400">No source file loaded.</td></tr>`;
+        return;
+    }
+
+    const maxRows = Math.min(150, state.grid.length);
+    let maxCols = 10;
+    for (let r = 0; r < maxRows; r++) {
+        if (state.grid[r] && state.grid[r].length > maxCols) {
+            maxCols = Math.min(30, state.grid[r].length);
+        }
+    }
+
+    let headHtml = `<tr><th class="py-2 px-2 bg-slate-900 border-r border-slate-700 text-center sticky left-0 z-20">Row #</th>`;
+    for (let c = 1; c <= maxCols; c++) {
+        let badge = '';
+        if (c === state.cols.ctnr) badge = `<span class="ml-1 px-1.5 py-0.5 bg-blue-600 text-white rounded text-[9px]">${escapeAttr(state.srcCtnrHeader)}</span>`;
+        else if (c === state.cols.seal) badge = `<span class="ml-1 px-1.5 py-0.5 bg-indigo-600 text-white rounded text-[9px]">SEAL#</span>`;
+        else if (c === state.cols.ctn)  badge = `<span class="ml-1 px-1.5 py-0.5 bg-violet-600 text-white rounded text-[9px]">CTN</span>`;
+        else if (c === state.cols.cbm)  badge = `<span class="ml-1 px-1.5 py-0.5 bg-amber-600 text-white rounded text-[9px]">CBM</span>`;
+        else if (c === state.cols.kgs)  badge = `<span class="ml-1 px-1.5 py-0.5 bg-emerald-600 text-white rounded text-[9px]">KGS (${escapeAttr(state.detectedKgsLabel)})</span>`;
+
+        headHtml += `<th class="py-1.5 px-2 border-r border-slate-700 text-center min-w-[95px]">Col ${colIndexToLetter(c)}${badge}</th>`;
+    }
+    headHtml += `</tr>`;
+    thead.innerHTML = headHtml;
+
+    let bodyHtml = '';
+    for (let r = 1; r <= maxRows; r++) {
+        const isHeader = (r === state.headerRow);
+        const isMatched = state.matchedSrcRows.has(r);
+
+        let trCls = 'hover:bg-indigo-50/60 cursor-pointer ';
+        if (isHeader) trCls = 'bg-amber-100 font-bold text-amber-950 border-y-2 border-amber-400 cursor-pointer ';
+        else if (isMatched) trCls = 'bg-blue-50/40 cursor-pointer ';
+
+        bodyHtml += `<tr onclick="setHeaderRowFromInspector(${r})" class="${trCls}" title="Click to set Row #${r} as Header Row">`;
+        bodyHtml += `<td class="py-1 px-2 border-r border-slate-300 text-center font-bold sticky left-0 z-10 ${isHeader ? 'bg-amber-400 text-slate-900' : (isMatched ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600')}">
+            ${r}${isHeader ? ' (HDR)' : (isMatched ? ' ✓' : '')}
+        </td>`;
+
+        for (let c = 1; c <= maxCols; c++) {
+            const val = cleanString(getCell(state.grid, r, c), false, false);
+            const isTargetCol = [state.cols.ctnr, state.cols.seal, state.cols.ctn, state.cols.cbm, state.cols.kgs].includes(c);
+            const cellHighlight = (isMatched && isTargetCol) ? 'bg-blue-100/70 font-semibold text-slate-900 ring-1 ring-inset ring-blue-300' : '';
+            bodyHtml += `<td class="py-1 px-2 border-r border-slate-200 truncate max-w-[160px] ${cellHighlight}" title="${escapeAttr(val)}">${escapeAttr(val)}</td>`;
+        }
+        bodyHtml += `</tr>`;
+    }
+    tbody.innerHTML = bodyHtml;
+}
+
+// ============================================================================
+// ONE-CLICK CLIPBOARD COPY & EXCEL EXPORT (Aptos Display, Centered, AutoFit)
+// ============================================================================
+function showCopyToast(msg) {
+    const toast = document.getElementById('copyToast');
+    document.getElementById('copyToastMsg').textContent = msg;
+    toast.classList.remove('hidden');
+    setTimeout(() => { toast.classList.add('hidden'); }, 3000);
+}
+
+function copyTableToClipboard(includeHeaders) {
+    if (state.cleanedRows.length === 0) {
+        alert("No data available to copy!");
+        return;
+    }
+
+    const lines = [];
+    // Output header strictly uses standard 5 columns: CTNR# (or CTN#), SEAL#, CTN, CBM, KGS
+    if (includeHeaders) {
+        lines.push([state.srcCtnrHeader || 'CTNR#', 'SEAL#', 'CTN', 'CBM', 'KGS'].join('\t'));
+    }
+
+    state.cleanedRows.forEach(r => {
+        lines.push([r.ctnr, r.seal, r.ctn, r.cbm, r.kgs].join('\t'));
+    });
+
+    const tsvText = lines.join('\n');
+    navigator.clipboard.writeText(tsvText).then(() => {
+        showCopyToast(`Copied ${state.cleanedRows.length} container row(s) ${includeHeaders ? '(with headers)' : '(data only)'}! Press Ctrl+V in Excel.`);
+    });
+}
+
+function copySingleColumn(field) {
+    if (state.cleanedRows.length === 0) {
+        alert("No data available to copy!");
+        return;
+    }
+    const lines = state.cleanedRows.map(r => r[field] || '');
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+        showCopyToast(`Copied ${lines.length} value(s) from ${field.toUpperCase()} column!`);
+    });
+}
+
+async function exportCleanExcel() {
+    if (state.cleanedRows.length === 0) {
+        alert("No data available to export!");
+        return;
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    // Matches VBA: wsDest.Name = "ContainerNo."
+    const ws = workbook.addWorksheet('ContainerNo.');
+
+    // Write Headers (A1:E1) - Always outputs standard KGS in E1 as per VBA
+    const headers = [state.srcCtnrHeader || 'CTNR#', 'SEAL#', 'CTN', 'CBM', 'KGS'];
+    ws.addRow(headers);
+
+    // Write Cleaned Data Rows
+    state.cleanedRows.forEach(r => {
+        const ctnVal = (r.ctn !== '' && !isNaN(r.ctn)) ? Number(r.ctn) : r.ctn;
+        const cbmVal = (r.cbm !== '' && !isNaN(r.cbm)) ? Number(r.cbm) : r.cbm;
+        const kgsVal = (r.kgs !== '' && !isNaN(r.kgs)) ? Number(r.kgs) : r.kgs;
+        ws.addRow([r.ctnr, r.seal, ctnVal, cbmVal, kgsVal]);
+    });
+
+    // Apply VBA Formatting: Font.Name = "Aptos Display", HorizontalAlignment = xlCenter, VerticalAlignment = xlCenter, AutoFit
+    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        row.eachCell({ includeEmpty: true }, cell => {
+            cell.font = {
+                name: 'Aptos Display',
+                size: 11,
+                bold: rowNumber === 1
+            };
+            cell.alignment = {
+                horizontal: 'center',
+                vertical: 'middle'
+            };
+        });
+    });
+
+    // AutoFit Columns
+    ws.columns.forEach(col => {
+        let maxLen = 10;
+        col.eachCell({ includeEmpty: true }, cell => {
+            const valStr = cell.value ? String(cell.value) : '';
+            if (valStr.length > maxLen) maxLen = valStr.length;
+        });
+        col.width = Math.max(14, maxLen + 5);
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'ContainerNo_Cleaned.xlsx');
+}
+
+function switchTab(tabId) {
+    ['tab-clean', 'tab-raw'].forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+        document.getElementById('btn-' + id).classList.remove('tab-active');
+    });
+    document.getElementById(tabId).classList.remove('hidden');
+    document.getElementById('btn-' + tabId).classList.add('tab-active');
+}
+
+function resetWorkspace() {
+    if (!confirm('Reset and clear the current file?')) return;
+    location.reload();
+}
+</script>
+</body>
+</html>
